@@ -12,7 +12,9 @@ from letta.schemas.enums import MessageStreamStatus
 from letta.schemas.letta_message import LegacyLettaMessage, LettaMessage
 from letta.schemas.letta_message_content import TextContent
 from letta.schemas.letta_response import LettaResponse
+from letta.schemas.letta_stop_reason import LettaStopReason, StopReasonType
 from letta.schemas.message import Message, MessageCreate, MessageUpdate
+from letta.schemas.usage import LettaUsageStatistics
 from letta.schemas.user import User
 from letta.services.agent_manager import AgentManager
 from letta.services.helpers.agent_manager_helper import compile_system_message
@@ -48,7 +50,9 @@ class BaseAgent(ABC):
         self.logger = get_logger(agent_id)
 
     @abstractmethod
-    async def step(self, input_messages: List[MessageCreate], max_steps: int = DEFAULT_MAX_STEPS) -> LettaResponse:
+    async def step(
+        self, input_messages: List[MessageCreate], max_steps: int = DEFAULT_MAX_STEPS, run_id: Optional[str] = None
+    ) -> LettaResponse:
         """
         Main execution loop for the agent.
         """
@@ -116,7 +120,8 @@ class BaseAgent(ABC):
                 system_prompt=agent_state.system,
                 in_context_memory=agent_state.memory,
                 in_context_memory_last_edit=memory_edit_timestamp,
-                previous_message_count=num_messages,
+                timezone=agent_state.timezone,
+                previous_message_count=num_messages - len(in_context_messages),
                 archival_memory_size=num_archival_memories,
                 tool_rules_solver=tool_rules_solver,
             )
@@ -136,3 +141,12 @@ class BaseAgent(ABC):
         except:
             logger.exception(f"Failed to rebuild memory for agent id={agent_state.id} and actor=({self.actor.id}, {self.actor.name})")
             raise
+
+    def get_finish_chunks_for_stream(self, usage: LettaUsageStatistics, stop_reason: Optional[LettaStopReason] = None):
+        if stop_reason is None:
+            stop_reason = LettaStopReason(stop_reason=StopReasonType.end_turn.value)
+        return [
+            stop_reason.model_dump_json(),
+            usage.model_dump_json(),
+            MessageStreamStatus.done.value,
+        ]
